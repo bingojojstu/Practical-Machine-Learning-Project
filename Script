@@ -1,0 +1,70 @@
+rm(list=ls())
+# load data
+training = read.csv("pml-training.csv")
+testing = read.csv("pml-testing.csv")
+
+#load library
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(randomForest)
+
+# set seed
+set.seed(65536)
+
+# train test validation split
+inTrain <- createDataPartition(training$classe, p=0.6, list=FALSE)
+myTraining <- training[inTrain, ]
+myTesting <- training[-inTrain, ]
+dim(myTraining); dim(myTesting)
+
+# remove zero variance information
+nzv <- nearZeroVar(myTraining)
+myTraining <- myTraining[,-nzv]
+myTesting <- myTesting[,-nzv]
+testing <- testing[,-nzv]
+# remove null over 95% 
+mostlyNA <- sapply(myTraining, function(x) mean(is.na(x))) > 0.95
+myTraining <- myTraining[, mostlyNA==F]
+myTesting <- myTesting[, mostlyNA==F]
+testing <- testing[, mostlyNA==F]
+# remove primary keys
+myTraining <- myTraining[, -(1:5)]
+myTesting <- myTesting[, -(1:5)]
+testing <- testing[,-(1:5)]
+# trai model
+fitControl <- trainControl(method = "repeatedcv",number = 5,repeats = 1)
+mod_rf <- randomForest(classe ~ ., data = myTraining)
+mod_gbm <- train(classe ~ ., data = myTraining, method = "gbm",trControl = fitControl)
+mod_lda <- train(classe ~ ., data = myTraining, method = "lda",trControl = fitControl)
+pred_rf <- predict(mod_rf, myTesting)
+pred_gbm <- predict(mod_gbm, myTesting)
+pred_lda <- predict(mod_lda, myTesting)
+predDF <- data.frame(pred_rf, pred_gbm, pred_lda, classe = myTesting$classe)
+combModFit <- randomForest(classe ~ ., data = predDF)
+combPred <- predict(combModFit, predDF)
+
+confusionMatrix(pred_rf, myTesting$classe)
+confusionMatrix(pred_gbm, myTesting$classe)
+confusionMatrix(pred_lda, myTesting$classe)
+confusionMatrix(combPred, myTesting$classe)
+plot(mod_rf)
+plot(mod_gbm)
+plot(combModFit)
+
+pred_rf <- predict(mod_rf, testing)
+pred_gbm <- predict(mod_gbm, testing)
+pred_lda <- predict(mod_lda, testing)
+predDF <- data.frame(test_rf, test_gbm, test_lda)
+preds <- predict(combModFit, predDF)
+
+preds <- as.character(preds)
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(preds)
