@@ -1,0 +1,131 @@
+---
+title: "R Notebook"
+output: html_notebook
+
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+Import the data
+```{r}
+rm(list=ls())
+# load data
+training = read.csv("/home/runhua/Downloads/R_course/pml-training.csv")
+testing = read.csv("/home/runhua/Downloads/R_course/pml-testing.csv")
+```
+Load library
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(randomForest)
+```
+Set seed
+```{r}
+set.seed(65536)
+```
+
+Train test validation split
+
+```{r}
+inTrain <- createDataPartition(training$classe, p=0.6, list=FALSE)
+myTraining <- training[inTrain, ]
+myTesting <- training[-inTrain, ]
+dim(myTraining); dim(myTesting)
+```
+Remove zero variance information
+```{r}
+nzv <- nearZeroVar(myTraining)
+myTraining <- myTraining[,-nzv]
+myTesting <- myTesting[,-nzv]
+testing <- testing[,-nzv]
+```
+
+Remove null over 95% 
+```{r}
+mostlyNA <- sapply(myTraining, function(x) mean(is.na(x))) > 0.95
+myTraining <- myTraining[, mostlyNA==F]
+myTesting <- myTesting[, mostlyNA==F]
+testing <- testing[, mostlyNA==F]
+dim(myTraining); dim(myTesting)
+```
+The data now has been reduced to 54 features where the majority are not nulls anymore.
+
+Remove primary keys
+```{r}
+myTraining <- myTraining[, -(1:5)]
+myTesting <- myTesting[, -(1:5)]
+testing <- testing[,-(1:5)]
+```
+
+Train model
+
+I use 5 fold cross validation for gradient boosting and lda models. The output are then used in the combined model.
+```{r}
+fitControl <- trainControl(method = "repeatedcv",number = 5,repeats = 1)
+mod_rf <- randomForest(classe ~ ., data = myTraining)
+mod_gbm <- train(classe ~ ., data = myTraining, method = "gbm",trControl = fitControl)
+mod_lda <- train(classe ~ ., data = myTraining, method = "lda",trControl = fitControl)
+pred_rf <- predict(mod_rf, myTesting)
+pred_gbm <- predict(mod_gbm, myTesting)
+pred_lda <- predict(mod_lda, myTesting)
+predDF <- data.frame(pred_rf, pred_gbm, pred_lda, classe = myTesting$classe)
+combModFit <- randomForest(classe ~ ., data = predDF)
+combPred <- predict(combModFit, predDF)
+```
+
+Display the confusionMatrix
+```{r}
+confusionMatrix(pred_rf, myTesting$classe)
+confusionMatrix(pred_gbm, myTesting$classe)
+confusionMatrix(pred_lda, myTesting$classe)
+confusionMatrix(combPred, myTesting$classe)
+```
+
+From the confusion Matrix, the accuracy achieved 0.9964 (with the RF being 0.9959).
+
+The ensembled model is slightly better than using RF alone.
+
+Display the Random Forest Model results
+```{r}
+plot(mod_rf)
+```
+Display the Boosted Regression Model results
+```{r}
+plot(mod_gbm)
+```
+Display the Ensembled Model results
+```{r}
+plot(combModFit)
+```
+
+This confirms with the Confusion Matrix results that the model is further enhanced (by a margin) by using ensemble model.
+
+Print the final Prediction
+```{r}
+pred_rf <- predict(mod_rf, testing)
+pred_gbm <- predict(mod_gbm, testing)
+pred_lda <- predict(mod_lda, testing)
+predDF <- data.frame(pred_rf, pred_gbm, pred_lda)
+preds <- predict(combModFit, predDF)
+```
+Shows the final Prediction Results
+```{r}
+preds
+```
+
+Save the results to file
+```{r}
+reds <- as.character(preds)
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(preds)
+```
+
